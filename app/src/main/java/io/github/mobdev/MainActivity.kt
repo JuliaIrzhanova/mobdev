@@ -1,235 +1,322 @@
 package io.github.mobdev
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.database.Cursor
 import android.os.Bundle
-import android.widget.Button
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
+import android.provider.ContactsContract
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 
-class MainActivity : AppCompatActivity() {
+data class Contact(
+    val name: String?,
+    val phoneNumber: String?,
+    val email: String?
+)
 
-    private lateinit var tvExpression: TextView
-    private lateinit var tvResult: TextView
-
-    private var currentInput = ""
-    private var firstValue: Double? = null
-    private var pendingOperation: String? = null
-    private var resetInputOnNextDigit = false
-    private var errorShown = false
-
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        tvExpression = findViewById(R.id.tvExpression)
-        tvResult = findViewById(R.id.tvResult)
-
-        if (savedInstanceState != null) {
-            currentInput = savedInstanceState.getString(KEY_CURRENT_INPUT, "")
-            if (savedInstanceState.containsKey(KEY_FIRST_VALUE)) {
-                firstValue = savedInstanceState.getDouble(KEY_FIRST_VALUE)
+        setContent {
+            MaterialTheme {
+                ContactsScreen()
             }
-            pendingOperation = savedInstanceState.getString(KEY_PENDING_OPERATION)
-            resetInputOnNextDigit = savedInstanceState.getBoolean(KEY_RESET_INPUT, false)
-            errorShown = savedInstanceState.getBoolean(KEY_ERROR_SHOWN, false)
         }
+    }
+}
 
-        setInputButton(R.id.btn0, "0")
-        setInputButton(R.id.btn1, "1")
-        setInputButton(R.id.btn2, "2")
-        setInputButton(R.id.btn3, "3")
-        setInputButton(R.id.btn4, "4")
-        setInputButton(R.id.btn5, "5")
-        setInputButton(R.id.btn6, "6")
-        setInputButton(R.id.btn7, "7")
-        setInputButton(R.id.btn8, "8")
-        setInputButton(R.id.btn9, "9")
-        setInputButton(R.id.btnDot, ".")
+@Composable
+fun ContactsScreen() {
+    val context = LocalContext.current
 
-        findViewById<Button>(R.id.btnPlus).setOnClickListener { onOperationClick("+") }
-        findViewById<Button>(R.id.btnMinus).setOnClickListener { onOperationClick("-") }
-        findViewById<Button>(R.id.btnMultiply).setOnClickListener { onOperationClick("*") }
-        findViewById<Button>(R.id.btnDivide).setOnClickListener { onOperationClick("/") }
-
-        findViewById<Button>(R.id.btnEquals).setOnClickListener { onEqualsClick() }
-        findViewById<Button>(R.id.btnClear).setOnClickListener { clearAll() }
-        findViewById<Button>(R.id.btnBackspace).setOnClickListener { backspace() }
-
-        updateDisplay()
+    var hasPermission by remember {
+        mutableStateOf(context.hasContactsPermission())
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putString(KEY_CURRENT_INPUT, currentInput)
-        if (firstValue != null) {
-            outState.putDouble(KEY_FIRST_VALUE, firstValue!!)
-        }
-        outState.putString(KEY_PENDING_OPERATION, pendingOperation)
-        outState.putBoolean(KEY_RESET_INPUT, resetInputOnNextDigit)
-        outState.putBoolean(KEY_ERROR_SHOWN, errorShown)
+    var contacts by remember {
+        mutableStateOf(emptyList<Contact>())
     }
 
-    private fun setInputButton(buttonId: Int, value: String) {
-        findViewById<Button>(buttonId).setOnClickListener {
-            appendToInput(value)
+    var selectedContact by remember {
+        mutableStateOf<Contact?>(null)
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasPermission = granted
+        contacts = if (granted) context.fetchAllContacts() else emptyList()
+    }
+
+    LaunchedEffect(hasPermission) {
+        if (hasPermission && contacts.isEmpty()) {
+            contacts = context.fetchAllContacts()
         }
     }
 
-    private fun appendToInput(value: String) {
-        if (errorShown) {
-            clearAll()
-        }
-
-        if (resetInputOnNextDigit) {
-            currentInput = ""
-            resetInputOnNextDigit = false
-        }
-
-        if (value == ".") {
-            if (currentInput.isEmpty()) {
-                currentInput = "0."
-            } else if (!currentInput.contains(".")) {
-                currentInput += "."
+    Scaffold { paddingValues ->
+        ScreenContent(
+            paddingValues = paddingValues,
+            hasPermission = hasPermission,
+            contacts = contacts,
+            onRequestPermission = {
+                permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+            },
+            onContactClick = { contact ->
+                selectedContact = contact
             }
+        )
+    }
+
+    selectedContact?.let { contact ->
+        ContactDetailsDialog(
+            contact = contact,
+            onDismiss = { selectedContact = null }
+        )
+    }
+}
+
+@Composable
+fun ScreenContent(
+    paddingValues: PaddingValues,
+    hasPermission: Boolean,
+    contacts: List<Contact>,
+    onRequestPermission: () -> Unit,
+    onContactClick: (Contact) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)
+            .padding(16.dp)
+    ) {
+        if (!hasPermission) {
+            PermissionContent(onRequestPermission = onRequestPermission)
         } else {
-            if (currentInput == "0") {
-                currentInput = value
-            } else {
-                currentInput += value
-            }
-        }
-
-        updateDisplay()
-    }
-
-    private fun onOperationClick(operation: String) {
-        if (errorShown) {
-            return
-        }
-
-        if (currentInput.isEmpty()) {
-            if (firstValue != null) {
-                pendingOperation = operation
-                updateDisplay()
-            }
-            return
-        }
-
-        if (firstValue == null) {
-            firstValue = currentInput.toDouble()
-        } else if (pendingOperation != null && !resetInputOnNextDigit) {
-            val secondValue = currentInput.toDouble()
-            val result = calculate(firstValue!!, secondValue, pendingOperation!!)
-            if (result == null) {
-                showError()
-                return
-            }
-            firstValue = result
-            currentInput = formatNumber(result)
-        }
-
-        pendingOperation = operation
-        resetInputOnNextDigit = true
-        updateDisplay()
-    }
-
-    private fun onEqualsClick() {
-        if (errorShown) {
-            return
-        }
-
-        if (firstValue == null || pendingOperation == null || currentInput.isEmpty()) {
-            return
-        }
-
-        val secondValue = currentInput.toDouble()
-        val result = calculate(firstValue!!, secondValue, pendingOperation!!)
-
-        if (result == null) {
-            showError()
-            return
-        }
-
-        currentInput = formatNumber(result)
-        firstValue = null
-        pendingOperation = null
-        resetInputOnNextDigit = true
-        updateDisplay()
-    }
-
-    private fun calculate(a: Double, b: Double, operation: String): Double? {
-        return when (operation) {
-            "+" -> a + b
-            "-" -> a - b
-            "*" -> a * b
-            "/" -> if (b == 0.0) null else a / b
-            else -> null
+            ContactsList(
+                contacts = contacts,
+                onContactClick = onContactClick
+            )
         }
     }
+}
 
-    private fun backspace() {
-        if (errorShown) {
-            clearAll()
-            return
-        }
+@Composable
+fun PermissionContent(
+    onRequestPermission: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = stringResource(R.string.permission_title),
+            style = MaterialTheme.typography.headlineSmall
+        )
 
-        if (resetInputOnNextDigit) {
-            return
-        }
+        Spacer(modifier = Modifier.height(12.dp))
 
-        if (currentInput.isNotEmpty()) {
-            currentInput = currentInput.dropLast(1)
-            updateDisplay()
+        Text(
+            text = stringResource(R.string.permission_message),
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onRequestPermission) {
+            Text(text = stringResource(R.string.grant_permission))
         }
     }
+}
 
-    private fun clearAll() {
-        currentInput = ""
-        firstValue = null
-        pendingOperation = null
-        resetInputOnNextDigit = false
-        errorShown = false
-        updateDisplay()
-    }
+@Composable
+fun ContactsList(
+    contacts: List<Contact>,
+    onContactClick: (Contact) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = stringResource(R.string.screen_title),
+            style = MaterialTheme.typography.headlineMedium
+        )
 
-    private fun updateDisplay() {
-        if (errorShown) {
-            tvExpression.text = ""
-            tvResult.text = "Error"
-            return
-        }
+        Spacer(modifier = Modifier.height(12.dp))
 
-        tvExpression.text = buildExpressionText()
-        tvResult.text = if (currentInput.isEmpty()) "0" else currentInput
-    }
-
-    private fun buildExpressionText(): String {
-        val firstText = if (firstValue != null) formatNumber(firstValue!!) else ""
-        val opText = pendingOperation ?: ""
-        return listOf(firstText, opText).filter { it.isNotEmpty() }.joinToString(" ")
-    }
-
-    private fun formatNumber(value: Double): String {
-        return if (value % 1.0 == 0.0) {
-            value.toLong().toString()
+        if (contacts.isEmpty()) {
+            Text(text = stringResource(R.string.no_contacts))
         } else {
-            value.toString()
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(contacts) { contact ->
+                    ContactItem(
+                        contact = contact,
+                        onClick = { onContactClick(contact) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContactItem(
+    contact: Contact,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = contact.name ?: stringResource(R.string.unknown_name),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+fun ContactDetailsDialog(
+    contact: Contact,
+    onDismiss: () -> Unit
+) {
+    val phone = contact.phoneNumber ?: stringResource(R.string.no_phone)
+    val email = contact.email ?: stringResource(R.string.no_email)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = contact.name ?: stringResource(R.string.unknown_name))
+        },
+        text = {
+            Column {
+                Text(text = stringResource(R.string.contact_details))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = stringResource(R.string.phone_value, phone))
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = stringResource(R.string.email_value, email))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(R.string.close))
+            }
+        }
+    )
+}
+
+fun Context.hasContactsPermission(): Boolean {
+    return ContextCompat.checkSelfPermission(
+        this,
+        Manifest.permission.READ_CONTACTS
+    ) == PackageManager.PERMISSION_GRANTED
+}
+
+@SuppressLint("Range")
+fun Context.fetchAllContacts(): List<Contact> {
+    val result = mutableListOf<Contact>()
+
+    contentResolver.query(
+        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+        arrayOf(
+            ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER
+        ),
+        null,
+        null,
+        "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+    ).use { cursor ->
+        if (cursor == null) return emptyList()
+
+        while (cursor.moveToNext()) {
+            val contactId = cursor.getLong(
+                cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
+            )
+
+            val name = cursor.getStringOrNull(
+                cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            )
+
+            val phoneNumber = cursor.getStringOrNull(
+                cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            )
+
+            val email = fetchEmailByContactId(contactId)
+
+            result.add(
+                Contact(
+                    name = name,
+                    phoneNumber = phoneNumber,
+                    email = email
+                )
+            )
         }
     }
 
-    private fun showError() {
-        currentInput = ""
-        firstValue = null
-        pendingOperation = null
-        resetInputOnNextDigit = false
-        errorShown = true
-        updateDisplay()
-    }
+    return result.distinctBy { Triple(it.name, it.phoneNumber, it.email) }
+}
 
-    companion object {
-        private const val KEY_CURRENT_INPUT = "currentInput"
-        private const val KEY_FIRST_VALUE = "firstValue"
-        private const val KEY_PENDING_OPERATION = "pendingOperation"
-        private const val KEY_RESET_INPUT = "resetInputOnNextDigit"
-        private const val KEY_ERROR_SHOWN = "errorShown"
+@SuppressLint("Range")
+fun Context.fetchEmailByContactId(contactId: Long): String? {
+    contentResolver.query(
+        ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+        arrayOf(ContactsContract.CommonDataKinds.Email.ADDRESS),
+        "${ContactsContract.CommonDataKinds.Email.CONTACT_ID} = ?",
+        arrayOf(contactId.toString()),
+        null
+    ).use { cursor ->
+        if (cursor == null || !cursor.moveToFirst()) return null
+
+        return cursor.getStringOrNull(
+            cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS)
+        )
     }
+}
+
+fun Cursor.getStringOrNull(index: Int): String? {
+    return if (index >= 0 && !isNull(index)) getString(index) else null
 }
