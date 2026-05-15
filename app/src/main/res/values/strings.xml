@@ -1,19 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Список контактов</string>
-    <string name="screen_title">Мои контакты</string>
-
-    <string name="permission_title">Нет доступа к контактам</string>
-    <string name="permission_message">Чтобы показать список контактов, выдай разрешение.</string>
-    <string name="grant_permission">Выдать разрешение</string>
-
-    <string name="no_contacts">Контакты не найдены</string>
-    <string name="unknown_name">Без имени</string>
-    <string name="contact_details">Информация о контакте</string>
-
-    <string name="phone_value">Телефон: %1$s</string>
-    <string name="email_value">Email: %1$s</string>
-    <string name="no_phone">не указан</string>
-    <string name="no_email">не указан</string>
-
+    <string name="app_name">FaeryChat</string>
+    <string name="hint_login">Логин</string>
+    <string name="hint_password">Пароль</string>
+    <string name="btn_login">Войти</string>
+    <string name="btn_logout">Выйти</string>
+    <string name="btn_send">Отправить</string>
+    <string name="hint_message">Сообщение…</string>
+    <string name="select_chat">Выберите чат</string>
+    <string name="wrong_credentials">Неверный логин / пароль</string>
+    <string name="error_empty_message">Нельзя отправить пустое сообщение</string>
+    <string name="channels_title">Каналы</string>
+    <string name="back">Назад</string>
     <string name="close">Закрыть</string>
 </resources>
