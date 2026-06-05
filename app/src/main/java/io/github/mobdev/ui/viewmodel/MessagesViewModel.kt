@@ -44,13 +44,21 @@ class MessagesViewModel(
     fun loadMessages() {
         viewModelScope.launch {
             val token = prefs.token ?: return@launch
+
+            // Сразу показываем кэш — как в референсе
+            val cached = repository.loadCachedMessages(channel)
+            if (cached.isNotEmpty()) {
+                _messages.value = cached
+            }
+
+            // Затем пробуем обновить из сети
             repository.fetchMessages(channel, token)
                 .onSuccess { _messages.value = it }
                 .onFailure {
                     when (it.message) {
                         "401" -> _error.value = "401"
-                        "offline" -> { /* кэш пуст — ничего не показываем */ }
-                        else -> _error.value = it.message
+                        "offline" -> { /* кэш уже показан выше */ }
+                        else -> if (cached.isEmpty()) _error.value = it.message
                     }
                 }
         }

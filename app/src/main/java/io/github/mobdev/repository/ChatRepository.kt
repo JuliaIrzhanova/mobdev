@@ -56,7 +56,7 @@ class ChatRepository private constructor(
             return if (merged.isNotEmpty()) Result.success(merged)
             else Result.failure(Exception("offline"))
         }
-        return runCatching {
+        return try {
             val response = ApiClient.service.getChannelMessages(
                 channel = channel, limit = 20, lastKnownId = "0",
                 reverse = false, token = token
@@ -65,16 +65,20 @@ class ChatRepository private constructor(
                 response.isSuccessful -> {
                     val messages = response.body() ?: emptyList()
                     local.saveMessages(channel, messages)
-                    messages
+                    Result.success(loadCachedMessages(channel))
                 }
-                response.code() == 401 -> throw Exception("401")
-                else -> throw Exception("HTTP ${response.code()}")
+                response.code() == 401 -> Result.failure(Exception("401"))
+                else -> {
+                    val cached = loadCachedMessages(channel)
+                    if (cached.isNotEmpty()) Result.success(cached)
+                    else Result.failure(Exception("HTTP ${response.code()}"))
+                }
             }
-        }.recoverCatching { error ->
-            if (error.message == "401") throw error
-            val merged = loadCachedMessages(channel)
-            if (merged.isNotEmpty()) merged else throw error
-        }.map { loadCachedMessages(channel) }
+        } catch (e: Exception) {
+            val cached = loadCachedMessages(channel)
+            if (cached.isNotEmpty()) Result.success(cached)
+            else Result.failure(e)
+        }
     }
 
     // ── Отправка ──────────────────────────────────────────────────────────────
