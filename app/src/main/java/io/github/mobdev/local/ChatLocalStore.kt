@@ -21,7 +21,7 @@ class ChatLocalStore(context: Context) {
     private val dataStore = context.chatDataStore
     private val gson = Gson()
 
-    // ── Каналы ────────────────────────────────────────────────────────────────
+    // Каналы
 
     suspend fun saveChannels(channels: List<String>) {
         dataStore.edit { it[KEY_CHANNELS] = gson.toJson(channels) }
@@ -33,7 +33,7 @@ class ChatLocalStore(context: Context) {
         return gson.fromJson(json, type)
     }
 
-    // ── Сообщения ─────────────────────────────────────────────────────────────
+    // Сообщения
 
     suspend fun saveMessages(channel: String, messages: List<Message>) {
         val dtos = messages.map { it.toDto() }
@@ -47,7 +47,7 @@ class ChatLocalStore(context: Context) {
         return dtos.map { it.toMessage() }
     }
 
-    // ── Pending сообщения ─────────────────────────────────────────────────────
+    // Pending сообщения
 
     suspend fun getPendingMessages(): List<PendingOutgoingMessage> {
         val json = dataStore.data.first()[KEY_PENDING] ?: return emptyList()
@@ -75,7 +75,7 @@ class ChatLocalStore(context: Context) {
         dataStore.edit { it.clear() }
     }
 
-    // ── Вспомогательные ───────────────────────────────────────────────────────
+    //Вспомогательные
 
     private fun parsePendingList(json: String?): List<PendingOutgoingMessage> {
         if (json.isNullOrBlank()) return emptyList()
@@ -93,7 +93,7 @@ class ChatLocalStore(context: Context) {
     }
 }
 
-// ── Конвертеры ────────────────────────────────────────────────────────────────
+//  Конвертеры
 
 private fun Message.toDto() = CachedMessageDto(
     id = id,

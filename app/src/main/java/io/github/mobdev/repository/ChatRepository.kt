@@ -20,7 +20,7 @@ class ChatRepository private constructor(
 
     val isOnline: StateFlow<Boolean> = networkMonitor.isOnline
 
-    // ── Каналы ────────────────────────────────────────────────────────────────
+    // Каналы
 
     suspend fun fetchChannels(): Result<List<String>> {
         if (!isOnline.value) {
@@ -41,7 +41,7 @@ class ChatRepository private constructor(
         }
     }
 
-    // ── Сообщения ─────────────────────────────────────────────────────────────
+    // Сообщения
 
     suspend fun loadCachedMessages(channel: String): List<Message> {
         val cached = local.getMessages(channel)
@@ -81,7 +81,7 @@ class ChatRepository private constructor(
         }
     }
 
-    // ── Отправка ──────────────────────────────────────────────────────────────
+    // Отправка
 
     suspend fun sendMessage(token: String, from: String, channel: String, text: String): Result<Boolean> {
         // Boolean: true = отправлено, false = добавлено в очередь
@@ -105,7 +105,7 @@ class ChatRepository private constructor(
         }
     }
 
-    // ── Очередь pending ───────────────────────────────────────────────────────
+    //  Очередь pending
 
     suspend fun flushPendingMessages(token: String, from: String) {
         if (!isOnline.value) return
@@ -122,7 +122,7 @@ class ChatRepository private constructor(
         }
     }
 
-    // ── Выход ─────────────────────────────────────────────────────────────────
+    // Выход
 
     suspend fun logout(token: String) {
         if (isOnline.value) runCatching { ApiClient.service.logout(token) }
