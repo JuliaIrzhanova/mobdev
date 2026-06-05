@@ -14,5 +14,5 @@
     <string name="back">Назад</string>
     <string name="close">Закрыть</string>
     <string name="offline_banner">Нет соединения — показаны кэшированные данные</string>
-    <string name="error_no_network">Нет сети. Отправка недоступна</string>
+    <string name="message_queued">Нет сети — сообщение отправится при появлении соединения</string>
 </resources>

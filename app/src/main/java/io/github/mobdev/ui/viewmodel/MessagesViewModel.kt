@@ -5,10 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.asLiveData
 import androidx.lifecycle.viewModelScope
+import io.github.mobdev.ChatApplication
 import io.github.mobdev.network.models.Message
 import io.github.mobdev.prefs.PrefsManager
-import io.github.mobdev.repository.ChatRepository
 import kotlinx.coroutines.launch
 
 class MessagesViewModel(
@@ -17,7 +18,7 @@ class MessagesViewModel(
 ) : AndroidViewModel(application) {
 
     private val prefs = PrefsManager(application)
-    private val repository = ChatRepository(application)
+    private val repository = (application as ChatApplication).repository
 
     var channel: String
         get() = savedStateHandle["channel"] ?: "1@channel"
@@ -32,47 +33,53 @@ class MessagesViewModel(
     private val _sending = MutableLiveData(false)
     val sending: LiveData<Boolean> = _sending
 
-    private val _isOnline = MutableLiveData(true)
-    val isOnline: LiveData<Boolean> = _isOnline
+    // true = отправлено, false = добавлено в очередь офлайн
+    private val _sendResult = MutableLiveData<Boolean?>(null)
+    val sendResult: LiveData<Boolean?> = _sendResult
+
+    val isOnline: LiveData<Boolean> = repository.isOnline.asLiveData()
 
     val username: String get() = prefs.login ?: ""
 
     fun loadMessages() {
         viewModelScope.launch {
             val token = prefs.token ?: return@launch
-            _isOnline.value = repository.isOnline()
-            try {
-                val (messages, online) = repository.getMessages(channel, token)
-                _isOnline.value = online
-                _messages.value = messages
-            } catch (e: Exception) {
-                if (repository.isOnline()) _error.value = e.message
-                // офлайн — просто показываем что есть в кэше, ошибку не показываем
-            }
+            repository.fetchMessages(channel, token)
+                .onSuccess { _messages.value = it }
+                .onFailure {
+                    when (it.message) {
+                        "401" -> _error.value = "401"
+                        "offline" -> { /* кэш пуст — ничего не показываем */ }
+                        else -> _error.value = it.message
+                    }
+                }
         }
     }
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
-        if (!repository.isOnline()) {
-            _error.value = "no_network"
-            return
-        }
         viewModelScope.launch {
             _sending.value = true
-            val token = prefs.token ?: run {
-                _sending.value = false
-                return@launch
-            }
-            val result = repository.sendMessage(token, username, channel, text)
-            result.fold(
-                onSuccess = { loadMessages() },
-                onFailure = { e ->
-                    if (e.message == "401") _error.value = "401"
-                    else _error.value = e.message
+            val token = prefs.token ?: run { _sending.value = false; return@launch }
+            repository.sendMessage(token, username, channel, text)
+                .onSuccess { sent ->
+                    _sendResult.value = sent
+                    _sendResult.value = null
+                    loadMessages()
                 }
-            )
+                .onFailure {
+                    if (it.message == "401") _error.value = "401"
+                    else _error.value = it.message
+                }
             _sending.value = false
+        }
+    }
+
+    fun flushPendingMessages() {
+        viewModelScope.launch {
+            val token = prefs.token ?: return@launch
+            repository.flushPendingMessages(token, username)
+            loadMessages()
         }
     }
 }

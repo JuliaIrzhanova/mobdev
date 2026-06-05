@@ -51,9 +51,7 @@ class MessagesFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val adapter = MessagesAdapter { imageUrl ->
-            openImage(imageUrl)
-        }
+        val adapter = MessagesAdapter { imageUrl -> openImage(imageUrl) }
 
         binding.rvMessages.layoutManager = LinearLayoutManager(requireContext()).apply {
             stackFromEnd = true
@@ -67,27 +65,38 @@ class MessagesFragment : Fragment() {
             }
         }
 
+        // Офлайн-баннер + автоматический flush при появлении сети
+        var wasOnline: Boolean? = null
         viewModel.isOnline.observe(viewLifecycleOwner) { online ->
             binding.tvOfflineBanner.visibility = if (online) View.GONE else View.VISIBLE
-            binding.btnSend.isEnabled = online && viewModel.sending.value != true
+            if (online && wasOnline == false) {
+                viewModel.flushPendingMessages()
+            }
+            wasOnline = online
         }
 
         viewModel.error.observe(viewLifecycleOwner) { error ->
             error ?: return@observe
             when (error) {
                 "401" -> navigateToLogin()
-                "no_network" -> Toast.makeText(
-                    requireContext(),
-                    getString(R.string.error_no_network),
-                    Toast.LENGTH_SHORT
-                ).show()
                 else -> Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
             }
         }
 
+        // true = отправлено сразу, false = добавлено в очередь
+        viewModel.sendResult.observe(viewLifecycleOwner) { sent ->
+            sent ?: return@observe
+            if (!sent) {
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.message_queued),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
         viewModel.sending.observe(viewLifecycleOwner) { sending ->
-            val online = viewModel.isOnline.value ?: true
-            binding.btnSend.isEnabled = !sending && online
+            binding.btnSend.isEnabled = !sending
         }
 
         binding.btnSend.setOnClickListener {
@@ -181,9 +190,7 @@ class MessagesAdapter(
             val thumbUrl = "https://faerytea.name/thumb/${imageData.link}"
             val fullUrl = "https://faerytea.name/img/${imageData.link}"
             holder.ivThumb.load(thumbUrl)
-            holder.ivThumb.setOnClickListener {
-                onImageClick(fullUrl)
-            }
+            holder.ivThumb.setOnClickListener { onImageClick(fullUrl) }
         }
     }
 

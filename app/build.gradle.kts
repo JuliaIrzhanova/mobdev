@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    id("kotlin-kapt")
 }
 
 android {
@@ -48,8 +47,6 @@ dependencies {
     // Картинки
     implementation("io.coil-kt:coil:2.7.0")
 
-    // Кэш (Room)
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    kapt(libs.androidx.room.compiler)
+    // Кэш (DataStore)
+    implementation(libs.androidx.datastore.preferences)
 }

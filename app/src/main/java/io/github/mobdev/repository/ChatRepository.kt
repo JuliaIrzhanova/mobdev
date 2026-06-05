@@ -1,118 +1,142 @@
 package io.github.mobdev.repository
 
 import android.content.Context
-import io.github.mobdev.db.AppDatabase
-import io.github.mobdev.db.ChannelEntity
-import io.github.mobdev.db.MessageEntity
+import io.github.mobdev.local.ChatLocalStore
+import io.github.mobdev.local.PendingOutgoingMessage
+import io.github.mobdev.local.toMessage
 import io.github.mobdev.network.ApiClient
-import io.github.mobdev.network.NetworkUtils
+import io.github.mobdev.network.NetworkMonitor
 import io.github.mobdev.network.models.Message
 import io.github.mobdev.network.models.MessageData
 import io.github.mobdev.network.models.SendMessage
 import io.github.mobdev.network.models.TextData
+import kotlinx.coroutines.flow.StateFlow
+import java.util.UUID
 
-class ChatRepository(private val context: Context) {
+class ChatRepository private constructor(
+    private val local: ChatLocalStore,
+    val networkMonitor: NetworkMonitor,
+) {
 
-    private val db = AppDatabase.getInstance(context)
-    private val channelDao = db.channelDao()
-    private val messageDao = db.messageDao()
-
-    fun isOnline(): Boolean = NetworkUtils.isOnline(context)
+    val isOnline: StateFlow<Boolean> = networkMonitor.isOnline
 
     // ── Каналы ────────────────────────────────────────────────────────────────
 
-    suspend fun getChannels(): List<String> {
-        if (isOnline()) {
-            try {
-                val response = ApiClient.service.getChannels()
-                if (response.isSuccessful) {
-                    val channels = response.body() ?: emptyList()
-                    channelDao.clearAll()
-                    channelDao.insertAll(channels.map { ChannelEntity(it) })
-                    return channels
-                }
-            } catch (_: Exception) {}
+    suspend fun fetchChannels(): Result<List<String>> {
+        if (!isOnline.value) {
+            val cached = local.getChannels()
+            return if (cached.isNotEmpty()) Result.success(cached)
+            else Result.failure(Exception("offline"))
         }
-        // офлайн или ошибка — отдаём кэш
-        return channelDao.getAll()
+        return runCatching {
+            val response = ApiClient.service.getChannels()
+            if (response.isSuccessful) {
+                val channels = response.body() ?: emptyList()
+                local.saveChannels(channels)
+                channels
+            } else throw Exception("HTTP ${response.code()}")
+        }.recoverCatching { error ->
+            val cached = local.getChannels()
+            if (cached.isNotEmpty()) cached else throw error
+        }
     }
 
     // ── Сообщения ─────────────────────────────────────────────────────────────
 
-    suspend fun getMessages(channel: String, token: String): Pair<List<Message>, Boolean> {
-        // Сначала отдаём кэш, потом пробуем сеть
-        val cached = messageDao.getByChannel(channel).map { it.toMessage() }
+    suspend fun loadCachedMessages(channel: String): List<Message> {
+        val cached = local.getMessages(channel)
+        val pending = local.getPendingMessagesForChannel(channel).map { it.toMessage() }
+        val ids = cached.map { it.id }.toSet()
+        return cached + pending.filter { it.id !in ids }
+    }
 
-        if (!isOnline()) {
-            return Pair(cached, false)
+    suspend fun fetchMessages(channel: String, token: String): Result<List<Message>> {
+        if (!isOnline.value) {
+            val merged = loadCachedMessages(channel)
+            return if (merged.isNotEmpty()) Result.success(merged)
+            else Result.failure(Exception("offline"))
         }
-
-        return try {
+        return runCatching {
             val response = ApiClient.service.getChannelMessages(
-                channel = channel,
-                limit = 20,
-                lastKnownId = "0",
-                reverse = false,
-                token = token
+                channel = channel, limit = 20, lastKnownId = "0",
+                reverse = false, token = token
             )
-            if (response.isSuccessful) {
-                val messages = response.body() ?: emptyList()
-                messageDao.insertAll(messages.map { it.toEntity(channel) })
-                // Возвращаем объединённый список без дублей (по id)
-                val networkIds = messages.map { it.id }.toSet()
-                val merged = cached.filter { it.id !in networkIds } + messages
-                Pair(merged.sortedBy { it.time }, true)
-            } else {
-                Pair(cached, response.code() != 401)
+            when {
+                response.isSuccessful -> {
+                    val messages = response.body() ?: emptyList()
+                    local.saveMessages(channel, messages)
+                    messages
+                }
+                response.code() == 401 -> throw Exception("401")
+                else -> throw Exception("HTTP ${response.code()}")
             }
-        } catch (_: Exception) {
-            Pair(cached, false)
-        }
+        }.recoverCatching { error ->
+            if (error.message == "401") throw error
+            val merged = loadCachedMessages(channel)
+            if (merged.isNotEmpty()) merged else throw error
+        }.map { loadCachedMessages(channel) }
     }
 
     // ── Отправка ──────────────────────────────────────────────────────────────
 
-    suspend fun sendMessage(token: String, from: String, to: String, text: String): Result<Unit> {
-        if (!isOnline()) return Result.failure(Exception("no_network"))
-        return try {
-            val msg = SendMessage(
-                from = from,
-                to = to,
-                data = MessageData(text = TextData(text))
+    suspend fun sendMessage(token: String, from: String, channel: String, text: String): Result<Boolean> {
+        // Boolean: true = отправлено, false = добавлено в очередь
+        if (!isOnline.value) {
+            local.addPendingMessage(
+                PendingOutgoingMessage(
+                    localId = "pending-${UUID.randomUUID()}",
+                    channel = channel,
+                    from = from,
+                    text = text,
+                    createdAt = System.currentTimeMillis()
+                )
             )
+            return Result.success(false)
+        }
+        return runCatching {
+            val msg = SendMessage(from = from, to = channel, data = MessageData(text = TextData(text)))
             val response = ApiClient.service.sendMessage(token, msg)
-            if (response.isSuccessful) Result.success(Unit)
-            else Result.failure(Exception(response.code().toString()))
-        } catch (e: Exception) {
-            Result.failure(e)
+            if (!response.isSuccessful) throw Exception(response.code().toString())
+            true
         }
     }
-}
 
-// ── Конвертеры ────────────────────────────────────────────────────────────────
+    // ── Очередь pending ───────────────────────────────────────────────────────
 
-private fun Message.toEntity(channel: String): MessageEntity {
-    val isImage = data.image != null
-    return MessageEntity(
-        id = id,
-        fromUser = from,
-        channel = channel,
-        dataType = if (isImage) "image" else "text",
-        textContent = data.text?.text,
-        imageLink = data.image?.link,
-        time = time
-    )
-}
-
-private fun MessageEntity.toMessage(): Message {
-    val data = if (dataType == "image") {
-        io.github.mobdev.network.models.MessageData(
-            image = io.github.mobdev.network.models.ImageData(link = imageLink)
-        )
-    } else {
-        io.github.mobdev.network.models.MessageData(
-            text = io.github.mobdev.network.models.TextData(text = textContent ?: "")
-        )
+    suspend fun flushPendingMessages(token: String, from: String) {
+        if (!isOnline.value) return
+        val pending = local.getPendingMessages()
+        for (msg in pending) {
+            runCatching {
+                ApiClient.service.sendMessage(
+                    token,
+                    SendMessage(from = from, to = msg.channel, data = MessageData(text = TextData(msg.text)))
+                )
+            }.onSuccess {
+                local.removePendingMessage(msg.localId)
+            }
+        }
     }
-    return Message(id = id, from = fromUser, to = channel, data = data, time = time)
+
+    // ── Выход ─────────────────────────────────────────────────────────────────
+
+    suspend fun logout(token: String) {
+        if (isOnline.value) runCatching { ApiClient.service.logout(token) }
+        local.clearAll()
+    }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: ChatRepository? = null
+
+        fun getInstance(context: Context): ChatRepository =
+            INSTANCE ?: synchronized(this) {
+                val monitor = NetworkMonitor(context.applicationContext)
+                monitor.start()
+                ChatRepository(
+                    local = ChatLocalStore(context.applicationContext),
+                    networkMonitor = monitor
+                ).also { INSTANCE = it }
+            }
+    }
 }

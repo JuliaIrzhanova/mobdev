@@ -36,7 +36,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } else {
-            // При повороте — если ландшафт и нет фрагмента в containerLeft
             if (isLandscape) {
                 val existing = supportFragmentManager.findFragmentById(R.id.containerLeft)
                 if (existing == null) {
@@ -48,9 +47,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onDestroy() {
+        (application as ChatApplication).repository.networkMonitor.stop()
+        super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (isLandscape) {
-            // В ландшафте кнопка назад закрывает правую панель
             val right = supportFragmentManager.findFragmentById(R.id.containerRight)
             if (right != null) {
                 supportFragmentManager.beginTransaction()
