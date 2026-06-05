@@ -46,7 +46,8 @@ class MessagesViewModel(
                 _isOnline.value = online
                 _messages.value = messages
             } catch (e: Exception) {
-                _error.value = e.message
+                if (repository.isOnline()) _error.value = e.message
+                // офлайн — просто показываем что есть в кэше, ошибку не показываем
             }
         }
     }
