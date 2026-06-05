@@ -67,17 +67,27 @@ class MessagesFragment : Fragment() {
             }
         }
 
+        viewModel.isOnline.observe(viewLifecycleOwner) { online ->
+            binding.tvOfflineBanner.visibility = if (online) View.GONE else View.VISIBLE
+            binding.btnSend.isEnabled = online && viewModel.sending.value != true
+        }
+
         viewModel.error.observe(viewLifecycleOwner) { error ->
             error ?: return@observe
-            if (error == "401") {
-                navigateToLogin()
-            } else {
-                Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
+            when (error) {
+                "401" -> navigateToLogin()
+                "no_network" -> Toast.makeText(
+                    requireContext(),
+                    getString(R.string.error_no_network),
+                    Toast.LENGTH_SHORT
+                ).show()
+                else -> Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
             }
         }
 
         viewModel.sending.observe(viewLifecycleOwner) { sending ->
-            binding.btnSend.isEnabled = !sending
+            val online = viewModel.isOnline.value ?: true
+            binding.btnSend.isEnabled = !sending && online
         }
 
         binding.btnSend.setOnClickListener {

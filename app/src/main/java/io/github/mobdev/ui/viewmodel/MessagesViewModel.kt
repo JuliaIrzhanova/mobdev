@@ -6,12 +6,9 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
-import io.github.mobdev.network.ApiClient
 import io.github.mobdev.network.models.Message
-import io.github.mobdev.network.models.MessageData
-import io.github.mobdev.network.models.SendMessage
-import io.github.mobdev.network.models.TextData
 import io.github.mobdev.prefs.PrefsManager
+import io.github.mobdev.repository.ChatRepository
 import kotlinx.coroutines.launch
 
 class MessagesViewModel(
@@ -20,6 +17,7 @@ class MessagesViewModel(
 ) : AndroidViewModel(application) {
 
     private val prefs = PrefsManager(application)
+    private val repository = ChatRepository(application)
 
     var channel: String
         get() = savedStateHandle["channel"] ?: "1@channel"
@@ -34,30 +32,19 @@ class MessagesViewModel(
     private val _sending = MutableLiveData(false)
     val sending: LiveData<Boolean> = _sending
 
+    private val _isOnline = MutableLiveData(true)
+    val isOnline: LiveData<Boolean> = _isOnline
+
     val username: String get() = prefs.login ?: ""
 
     fun loadMessages() {
         viewModelScope.launch {
+            val token = prefs.token ?: return@launch
+            _isOnline.value = repository.isOnline()
             try {
-                val token = prefs.token ?: return@launch
-                val response = ApiClient.service.getChannelMessages(
-                    channel = channel,
-                    limit = 20,
-                    lastKnownId = "0",
-                    reverse = false,
-                    token = token
-                )
-                when {
-                    response.isSuccessful -> {
-                        _messages.value = response.body() ?: emptyList()
-                    }
-                    response.code() == 401 -> {
-                        _error.value = "401"
-                    }
-                    else -> {
-                        _error.value = "Ошибка: ${response.code()}"
-                    }
-                }
+                val (messages, online) = repository.getMessages(channel, token)
+                _isOnline.value = online
+                _messages.value = messages
             } catch (e: Exception) {
                 _error.value = e.message
             }
@@ -66,32 +53,25 @@ class MessagesViewModel(
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
+        if (!repository.isOnline()) {
+            _error.value = "no_network"
+            return
+        }
         viewModelScope.launch {
             _sending.value = true
-            try {
-                val token = prefs.token ?: return@launch
-                val msg = SendMessage(
-                    from = username,
-                    to = channel,
-                    data = MessageData(text = TextData(text))
-                )
-                val response = ApiClient.service.sendMessage(token, msg)
-                when {
-                    response.isSuccessful -> {
-                        loadMessages()
-                    }
-                    response.code() == 401 -> {
-                        _error.value = "401"
-                    }
-                    else -> {
-                        _error.value = "Ошибка: ${response.code()}"
-                    }
-                }
-            } catch (e: Exception) {
-                _error.value = e.message
-            } finally {
+            val token = prefs.token ?: run {
                 _sending.value = false
+                return@launch
             }
+            val result = repository.sendMessage(token, username, channel, text)
+            result.fold(
+                onSuccess = { loadMessages() },
+                onFailure = { e ->
+                    if (e.message == "401") _error.value = "401"
+                    else _error.value = e.message
+                }
+            )
+            _sending.value = false
         }
     }
 }
